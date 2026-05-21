@@ -1,0 +1,13 @@
+data/nhanes/*
+!data/nhanes/.gitkeep
+output/*
+!output/.gitkeep
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.mypy_cache/
+.DS_Store
+*.xpt
+*.XPT
