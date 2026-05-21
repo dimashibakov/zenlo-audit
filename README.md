@@ -28,26 +28,37 @@ pip install -r requirements.txt
 
 ## Data setup
 
-Place NHANES XPT files in `data/nhanes/` **or** set:
+NHANES XPT files live in **per-cycle subfolders** under the data root:
 
-```bash
-export ZENLO_AUDIT_DATA=/path/to/nhanes/xpt
+```
+data/nhanes/2015-2016/DEMO_I.XPT
+data/nhanes/2015-2016/GLU_I.XPT
+...
 ```
 
-### Expected files per cycle
+Or set the root (cycle subfolder is appended automatically):
 
-For cycle **2017-2018** (suffix `J`), place these files in `DATA_DIR`:
+```bash
+export ZENLO_AUDIT_DATA=/path/to/nhanes   # loader reads $ZENLO_AUDIT_DATA/2015-2016/*.XPT
+```
 
-| File | NHANES content | Harness biomarkers |
-|------|------------------|-------------------|
-| `DEMO_J.XPT` | Demographics | SEQN, RIDAGEYR, RIAGENDR, RIDRETH3 |
-| `CRP_J.XPT` | C-reactive protein | LBXCRP → **HSCRP** |
-| `GLU_J.XPT` | Fasting glucose + insulin | LBXGLU → **GLU**, LBXIN → **INSULIN** |
-| `BIOPRO_J.XPT` | Standard biochemistry | LBXSCA → **CALCIUM**, LBXFER → **FERRITIN**, LBXGH → **HBA1C** |
-| `HDL_J.XPT` | HDL cholesterol | LBDHDD → **HDL** |
-| `TRIGLY_J.XPT` | Triglycerides | LBXTR → **TG** |
+### Expected files — cycle 2015-2016 (suffix `I`)
 
-Other supported cycles: `2011-2012` (G), `2013-2014` (H), `2015-2016` (I) — same stem pattern with cycle letter.
+Place these in `data/nhanes/2015-2016/` (or `$ZENLO_AUDIT_DATA/2015-2016/`):
+
+| File | NHANES column | Harness code |
+|------|---------------|--------------|
+| `DEMO_I.XPT` | SEQN, RIDAGEYR, RIAGENDR, RIDRETH3 | demographics |
+| `GLU_I.XPT` | LBXGLU | **GLU** |
+| `INS_I.XPT` | LBXIN (or LBDINSI → converted) | **INSULIN** |
+| `GHB_I.XPT` | LBXGH | **HBA1C** |
+| `HDL_I.XPT` | LBDHDD | **HDL** |
+| `TRIGLY_I.XPT` | LBXTR | **TG** |
+| `TCHOL_I.XPT` | LBXTC | **TOTAL_CHOL** |
+
+**Not available on DO server for cycle I:** CRP (hs-CRP), BIOPRO (calcium, ferritin). The harness reports `DATA_UNAVAILABLE` for HSCRP, CALCIUM, FERRITIN, and the **inflammation** pattern — it does not crash.
+
+Other supported cycles: `2007-2008` (E), `2011-2012` (G), `2013-2014` (H), `2017-2018` (J) — same file stem pattern with cycle letter, in `data/nhanes/<cycle>/`.
 
 Download from [NHANES](https://wwwn.cdc.gov/nchs/nhanes/) or copy from your server (`~/data/nhanes/` on DO).
 
@@ -56,14 +67,14 @@ Download from [NHANES](https://wwwn.cdc.gov/nchs/nhanes/) or copy from your serv
 ```bash
 source .venv/bin/activate
 
-# Single biomarker
-python -m audit_harness.run --biomarker HSCRP --cycle 2017-2018
+# Single biomarker (cycle 2015-2016 default)
+python -m audit_harness.run --biomarker GLU --cycle 2015-2016
 
 # Single pattern
-python -m audit_harness.run --pattern inflammation --cycle 2017-2018
+python -m audit_harness.run --pattern metabolic_syndrome --cycle 2015-2016
 
 # All configured units
-python -m audit_harness.run --all --cycle 2017-2018
+python -m audit_harness.run --all --cycle 2015-2016
 ```
 
 Outputs land in `output/`:

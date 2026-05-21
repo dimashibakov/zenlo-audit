@@ -12,7 +12,12 @@ REPORT_TEMPLATE = Template("""# Zenlo Audit Validation Report
 
 **Unit:** {{ unit_type }} `{{ unit_id }}`
 **NHANES cycle:** {{ cycle }}
+**Status:** {{ status }}
 **Generated:** {{ generated_at }}
+
+{% if status_message %}
+> {{ status_message }}
+{% endif %}
 
 ## Cohort summary
 
@@ -21,6 +26,12 @@ REPORT_TEMPLATE = Template("""# Zenlo Audit Validation Report
 | Total rows | {{ cohort.n_total }} |
 | Valid / detected | {{ cohort_display }} |
 
+{% if status == "DATA_UNAVAILABLE" %}
+## Result
+
+Data for this audit unit is **not available** in the current NHANES file set.
+See `status_message` in `results.json` for details.
+{% else %}
 ## Distribution
 
 ```json
@@ -38,6 +49,7 @@ REPORT_TEMPLATE = Template("""# Zenlo Audit Validation Report
 ```json
 {{ fairness_json }}
 ```
+{% endif %}
 
 ---
 
@@ -46,8 +58,11 @@ REPORT_TEMPLATE = Template("""# Zenlo Audit Validation Report
 
 
 def render_markdown_report(results: dict[str, Any]) -> str:
+    status = results.get("status", "OK")
     cohort_display = results["cohort"].get("n_valid", results["cohort"].get("n_detected", "—"))
     return REPORT_TEMPLATE.render(
+        status=status,
+        status_message=results.get("status_message", ""),
         cohort_display=cohort_display,
         distribution_json=json.dumps(results.get("distribution", {}), indent=2, default=str),
         agreement_json=json.dumps(results.get("agreement", {}), indent=2, default=str),

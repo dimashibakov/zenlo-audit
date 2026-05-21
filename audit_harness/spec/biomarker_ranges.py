@@ -135,6 +135,17 @@ LDL = ReferenceRange(
     citation="LDL elevated if >130 mg/dL (ATP III / common clinical cutoff)",
 )
 
+# Source: NHANES LBXTC — total cholesterol; desirable <200 mg/dL (NCEP ATP III).
+TOTAL_CHOL = ReferenceRange(
+    min_value=0.0,
+    max_value=200.0,
+    unit="mg/dL",
+    citation="NHANES LBXTC; total cholesterol desirable <200 mg/dL (NCEP ATP III)",
+)
+
+# Note: HSCRP, CALCIUM, FERRITIN retain spec entries for future cycles with CRP/BIOPRO
+# files. On cycle 2015-2016 (suffix I) the harness reports DATA UNAVAILABLE, not error.
+
 BIOMARKER_RANGES: dict[str, ReferenceRange | tuple[ReferenceRange, ReferenceRange]] = {
     "HSCRP": HSCRP,
     "CRP": HSCRP,
@@ -150,6 +161,8 @@ BIOMARKER_RANGES: dict[str, ReferenceRange | tuple[ReferenceRange, ReferenceRang
     "CALCIUM": CALCIUM,
     "PTH": PTH,
     "LDL": LDL,
+    "TOTAL_CHOL": TOTAL_CHOL,
+    "TOTAL_CHOLESTEROL": TOTAL_CHOL,
 }
 
 

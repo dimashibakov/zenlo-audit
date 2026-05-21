@@ -18,18 +18,33 @@ import pandas as pd
 from config import DATA_DIR, OUTPUT_DIR
 from audit_harness.classifiers.pattern import detect_pattern_cohort
 from audit_harness.loaders.nhanes import (
+    biomarker_available,
+    biomarker_unavailable_reason,
+    cycle_data_dir,
     expected_files_for_cycle,
     filter_cohort,
     load_nhanes_cycle,
+    pattern_available,
 )
 from audit_harness.reporters.markdown import write_json, write_report
 from audit_harness.tests.agreement import agreement_for_biomarker
 from audit_harness.tests.distribution import distribution_for_biomarker, distribution_for_pattern
 from audit_harness.tests.fairness import fairness_for_biomarker, fairness_for_pattern
 
-DEFAULT_CYCLE = "2017-2018"
+DEFAULT_CYCLE = "2015-2016"
 
-BIOMARKERS = ["HSCRP", "GLU", "INSULIN", "CALCIUM", "TG", "HDL", "HBA1C", "LDL"]
+BIOMARKERS = [
+    "HSCRP",
+    "GLU",
+    "INSULIN",
+    "CALCIUM",
+    "FERRITIN",
+    "TG",
+    "HDL",
+    "HBA1C",
+    "TOTAL_CHOL",
+    "LDL",
+]
 PATTERNS = ["inflammation", "insulin_resistance", "metabolic_syndrome"]
 
 
@@ -45,12 +60,12 @@ def _git_commit() -> str | None:
 
 def _file_hashes(data_dir: Path, cycle: str) -> dict[str, str]:
     hashes: dict[str, str] = {}
+    cycle_dir = cycle_data_dir(data_dir, cycle)
     for stem in expected_files_for_cycle(cycle):
         for ext in (".XPT", ".xpt"):
-            path = data_dir / f"{stem}{ext}"
+            path = cycle_dir / f"{stem}{ext}"
             if path.exists():
-                h = hashlib.sha256(path.read_bytes()).hexdigest()
-                hashes[path.name] = h
+                hashes[path.name] = hashlib.sha256(path.read_bytes()).hexdigest()
                 break
     return hashes
 
@@ -75,14 +90,40 @@ def build_manifest(cycle: str, data_dir: Path, unit_id: str) -> dict[str, Any]:
         "platform": platform.platform(),
         "package_versions": _package_versions(),
         "data_dir": str(data_dir),
+        "cycle_data_dir": str(cycle_data_dir(data_dir, cycle)),
         "input_file_hashes_sha256": _file_hashes(data_dir, cycle),
         "git_commit": _git_commit(),
     }
 
 
-def run_biomarker(code: str, cycle: str, data_dir: Path) -> dict[str, Any]:
-    df = load_nhanes_cycle(cycle, data_dir)
-    df = filter_cohort(df, min_age=18)
+def _unavailable_result(
+    unit_type: str,
+    unit_id: str,
+    cycle: str,
+    message: str,
+    *,
+    n_total: int = 0,
+) -> dict[str, Any]:
+    return {
+        "unit_type": unit_type,
+        "unit_id": unit_id,
+        "cycle": cycle,
+        "status": "DATA_UNAVAILABLE",
+        "status_message": message,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "cohort": {"n_total": n_total},
+        "distribution": {"note": message},
+        "agreement": {"note": message},
+        "fairness": {"note": message},
+    }
+
+
+def run_biomarker(code: str, cycle: str, data_dir: Path, df: pd.DataFrame) -> dict[str, Any]:
+    code = code.upper()
+    reason = biomarker_unavailable_reason(code, cycle)
+    if reason or not biomarker_available(df, code):
+        msg = reason or f"Biomarker {code} column has no usable values in loaded cohort"
+        return _unavailable_result("biomarker", code, cycle, msg, n_total=len(df))
 
     dist = distribution_for_biomarker(df, code)
     agree = agreement_for_biomarker(df, code)
@@ -90,8 +131,9 @@ def run_biomarker(code: str, cycle: str, data_dir: Path) -> dict[str, Any]:
 
     return {
         "unit_type": "biomarker",
-        "unit_id": code.upper(),
+        "unit_id": code,
         "cycle": cycle,
+        "status": "OK",
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "cohort": {"n_total": len(df), "n_valid": dist["n_valid"]},
         "distribution": dist,
@@ -100,9 +142,14 @@ def run_biomarker(code: str, cycle: str, data_dir: Path) -> dict[str, Any]:
     }
 
 
-def run_pattern(slug: str, cycle: str, data_dir: Path) -> dict[str, Any]:
-    df = load_nhanes_cycle(cycle, data_dir)
-    df = filter_cohort(df, min_age=18)
+def run_pattern(slug: str, cycle: str, data_dir: Path, df: pd.DataFrame) -> dict[str, Any]:
+    slug = slug.lower()
+    ok, reason = pattern_available(df, slug, cycle)
+    if not ok:
+        return _unavailable_result(
+            "pattern", slug, cycle, reason or "Pattern data unavailable", n_total=len(df)
+        )
+
     df = detect_pattern_cohort(df, slug)
     detected_col = f"pattern_{slug}_detected"
 
@@ -113,6 +160,7 @@ def run_pattern(slug: str, cycle: str, data_dir: Path) -> dict[str, Any]:
         "unit_type": "pattern",
         "unit_id": slug,
         "cycle": cycle,
+        "status": "OK",
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "cohort": {"n_total": len(df), "n_detected": dist["n_detected"]},
         "distribution": dist,
@@ -128,12 +176,11 @@ def persist_results(results: dict[str, Any], manifest: dict[str, Any]) -> tuple[
     base = OUTPUT_DIR / f"{unit_id}_results"
     json_path = Path(f"{base}.json")
     md_path = Path(f"{base}_report.md")
-    manifest_path = OUTPUT_DIR / "manifest.json"
 
     payload = {"results": results, "manifest": manifest}
     write_json(payload, json_path)
     write_report(results, md_path)
-    write_json(manifest, manifest_path)
+    write_json(manifest, OUTPUT_DIR / "manifest.json")
     return json_path, md_path
 
 
@@ -147,7 +194,7 @@ def main(argv: list[str] | None = None) -> int:
         "--data-dir",
         type=Path,
         default=None,
-        help=f"NHANES XPT directory (default: {DATA_DIR})",
+        help=f"NHANES root directory (default: {DATA_DIR}); XPT files live in <data-dir>/<cycle>/",
     )
     args = parser.parse_args(argv)
 
@@ -166,15 +213,23 @@ def main(argv: list[str] | None = None) -> int:
         if args.pattern:
             units.append(("pattern", args.pattern.lower()))
 
+    df = filter_cohort(load_nhanes_cycle(args.cycle, data_dir), min_age=18)
+    load_warnings = df.attrs.get("load_warnings", [])
+    if load_warnings:
+        print(f"Load warnings ({len(load_warnings)}):")
+        for w in load_warnings:
+            print(f"  - {w}")
+
     for unit_type, unit_id in units:
         manifest = build_manifest(args.cycle, data_dir, unit_id)
         if unit_type == "biomarker":
-            results = run_biomarker(unit_id, args.cycle, data_dir)
+            results = run_biomarker(unit_id, args.cycle, data_dir, df)
         else:
-            results = run_pattern(unit_id, args.cycle, data_dir)
+            results = run_pattern(unit_id, args.cycle, data_dir, df)
         json_path, md_path = persist_results(results, manifest)
-        print(f"Wrote {json_path}")
-        print(f"Wrote {md_path}")
+        status = results.get("status", "OK")
+        print(f"[{status}] Wrote {json_path}")
+        print(f"[{status}] Wrote {md_path}")
         print(f"Manifest: {OUTPUT_DIR / 'manifest.json'}")
 
     return 0
